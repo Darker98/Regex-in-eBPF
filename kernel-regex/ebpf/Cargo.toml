@@ -1,0 +1,12 @@
+[package]
+name = "kernel-xdp-ebpf"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aya_bpf = { version = "0.1", features = ["bindings"] }
+aya_log_ebpf = "0.1"
+
+[[bin]]
+name = "xdp_pattern_match"
+path = "src/main.rs"
