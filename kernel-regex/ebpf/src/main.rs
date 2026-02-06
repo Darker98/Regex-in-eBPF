@@ -13,10 +13,6 @@ use core::mem;
 #[map]
 static ALGORITHM_MAP: Array<[u8; 64]> = Array::with_max_entries(256, 0);
 
-// Map to store match results
-#[map]
-static RESULTS_MAP: Array<u32> = Array::with_max_entries(256, 0);
-
 #[repr(C)]
 pub struct EthHdr {
     pub dst_addr: [u8; 6],

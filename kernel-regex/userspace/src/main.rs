@@ -1,87 +1,100 @@
-use aya::{
-    maps::Array,
-    programs::{Xdp, XdpFlags},
-    Bpf,
-};
-use clap::Parser;
-use log::info;
-use std::convert::TryInto;
+use axum::{routing::post, Json, Router};
+use aya::{maps::Array, Bpf};
+use serde::{Deserialize, Serialize};
+use std::{net::SocketAddr, sync::Arc};
+use tokio::sync::Mutex;
 
-#[derive(Parser)]
-#[command(author, version, about)]
+const REGEX_PATTERN: &str = r"/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/";
+
+#[derive(Debug, Parser)]
 struct Opt {
-    /// Interface to attach XDP program to
-    #[arg(short, long)]
+    #[clap(short, long, default_value = "eth0")]
     iface: String,
+}
 
-    /// Pattern to load into kernel map
-    #[arg(short, long)]
-    pattern: String,
+fn attach_xdp_program() -> Result<(), anyhow::Error> {
+    let opt = Opt::parse();
 
-    /// eBPF object file path
-    #[arg(short, long)]
-    ebpf: Option<String>,
+    let mut bpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
+        env!("OUT_DIR"),
+        "/ebpf"
+    )))?;
+
+    match EbpfLogger::init(&mut bpf) {
+        Err(e) => {
+            // This can happen if you remove all log statements from your eBPF program.
+            warn!("failed to initialize eBPF logger: {e}");
+        }
+        Ok(logger) => {
+            let mut logger = tokio::io::unix::AsyncFd::with_interest(
+                logger,
+                tokio::io::Interest::READABLE,
+            )?;
+            tokio::task::spawn(async move {
+                loop {
+                    let mut guard = logger.readable_mut().await.unwrap();
+                    guard.get_inner_mut().flush();
+                    guard.clear_ready();
+                }
+            });
+        }
+    }
+
+    let program: &mut Xdp = bpf.program_mut("ebpf").unwrap().try_into()?;
+    program.load()?;
+  
+    program.attach(&opt.iface, XdpFlags::default())
+        .context("failed to attach the XDP program with default flags - try changing XdpFlags::default() to XdpFlags::SKB_MODE")?;
+
+    Ok(())
+}
+
+fn upload_regex_to_ebpf() -> Result<> {
+    // Load algorithm map 
+    let mut algorithm_map: Array<_, [u8; 64]> = match bpf_lock.map_mut("ALGORITHM_MAP") {
+        Ok(m) => match m.try_into() {
+            Ok(arr) => arr,
+            Err(e) => return Err((format!("map try_into error: {}", e))),
+        },
+        Err(e) => return Err((format!("map error: {}", e))),
+    };
+
+    let mut pattern_buf = [0u8; 64];
+    let bytes = REGEX_PATTERN.as_bytes();
+    let copy_len = bytes.len().min(63);
+    pattern_buf[..copy_len].copy_from_slice(&bytes[..copy_len]);
+
+    if let Err(e) = algorithm_map.set(0, pattern_buf, 0) {
+        return Err((format!("failed to set pattern: {}", e)));
+    }
+
+    Ok(())
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
-    let opts = Opt::parse();
-
-    info!("Kernel-space Pattern Matching with Aya");
-    info!("Interface: {}", opts.iface);
-    info!("Pattern: {}", opts.pattern);
-
-    // Load eBPF program
-    let ebpf_path = opts.ebpf.unwrap_or_else(|| {
-        "/usr/local/bin/xdp_pattern_match".to_string()
-    });
-
-    let mut bpf = Bpf::load_file(&ebpf_path)?;
-    info!("eBPF program loaded");
-
-    // Get algorithm map and load pattern
-    let mut algorithm_map: Array<_, [u8; 64]> = bpf.map_mut("ALGORITHM_MAP")?
-        .try_into()?;
-
-    let mut pattern_buf = [0u8; 64];
-    let pattern_bytes = opts.pattern.as_bytes();
-    let copy_len = pattern_bytes.len().min(63);
-    pattern_buf[..copy_len].copy_from_slice(&pattern_bytes[..copy_len]);
-
-    algorithm_map.set(0, pattern_buf, 0)?;
-    info!("Pattern loaded into kernel map");
-
-    // Load XDP program
-    let program: &mut Xdp = bpf.program_mut("xdp_pattern_match")
-        .ok_or("No XDP program found")?
-        .try_into()?;
-
-    program.load()?;
-    program.attach(&opts.iface, XdpFlags::default())?;
-    info!("XDP program attached to {}", opts.iface);
-
-    // Get results map for monitoring
-    let results_map: Array<_, u32> = bpf.map("RESULTS_MAP")?
-        .try_into()?;
-
-    info!("Pattern matching active in kernel space");
-    
-    let mut count = 0;
-    loop {
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-
-        // Check results map for matches
-        if let Ok(result) = results_map.get(0, 0) {
-            if result == 1 {
-                info!("Pattern match detected!");
-            }
-        }
-
-        count += 1;
-        if count % 10 == 0 {
-            info!("Still monitoring. Kernel pattern matching active.");
-        }
+    // Attach XDP program to the specified interface
+    match attach_xdp_program() {
+        Ok(_) => println!("XDP program attached successfully"),
+        Err(e) => eprintln!("Error attaching XDP program: {}", e),
     }
+
+    // Attempt to upload regex pattern to eBPF map at startup
+    match upload_regex_to_ebpf() {
+        Ok(_) => println!("Uploaded regex pattern to eBPF map successfully"),
+        Err(e) => eprintln!("Error uploading regex to eBPF: {}", e),
+    }
+
+    let app = Router::new()
+        .route("/match", post(match_handler));
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], 4000));
+    println!("Kernel XDP match endpoint listening on http://{}", addr);
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
+        .await?;
+
+    Ok(())
 }

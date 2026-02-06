@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-aya_bpf = { version = "0.1", features = ["bindings"] }
-aya_log_ebpf = "0.1"
+aya = { version = "0.13", features = ["async_support"] }
+aya-log = "0.2"
 
 [[bin]]
 name = "xdp_pattern_match"
