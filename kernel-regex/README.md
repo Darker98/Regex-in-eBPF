@@ -1,80 +1,57 @@
-# Kernel-Space Pattern Matching with Aya XDP
+# kernel-regex
 
-Rust/Aya implementation where pattern matching algorithms are loaded from userspace into kernel BPF maps and executed at XDP layer.
+## Prerequisites
 
-## Architecture
+1. stable rust toolchains: `rustup toolchain install stable`
+1. nightly rust toolchains: `rustup toolchain install nightly --component rust-src`
+1. (if cross-compiling) rustup target: `rustup target add ${ARCH}-unknown-linux-musl`
+1. (if cross-compiling) LLVM: (e.g.) `brew install llvm` (on macOS)
+1. (if cross-compiling) C toolchain: (e.g.) [`brew install filosottile/musl-cross/musl-cross`](https://github.com/FiloSottile/homebrew-musl-cross) (on macOS)
+1. bpf-linker: `cargo install bpf-linker` (`--no-default-features` on macOS)
 
-```
-Incoming Packets
-       ↓
-   [XDP Layer (Aya)] - Pattern matching in kernel
-       ↓
-   [BPF Maps] - Algorithm retrieved from map
-       ↓
-Match/Drop Decision
-```
+## Build & Run
 
-## Project Structure
+Use `cargo build`, `cargo check`, etc. as normal. Run your program with:
 
-- **ebpf/**: eBPF kernel program written in Rust using Aya
-  - `src/main.rs`: XDP program with substring pattern matching
-  - `Cargo.toml`: eBPF dependencies
-
-- **userspace/**: Userspace loader and monitor
-  - `src/main.rs`: Loads eBPF program, injects patterns into maps, monitors results
-  - `Cargo.toml`: Runtime dependencies (aya, tokio)
-
-## Build
-
-```bash
-cargo build --release
+```shell
+cargo run --release
 ```
 
-This produces:
-- eBPF object file in `target/bpfeb-unknown-none/release/xdp_pattern_match`
-- Userspace binary in `target/release/kernel-xdp`
+Cargo build scripts are used to automatically build the eBPF correctly and include it in the
+program.
 
-## Usage
+## Cross-compiling on macOS
 
-```bash
-sudo ./target/release/kernel-xdp \
-  --iface eth0 \
-  --pattern "GET" \
-  --ebpf ./target/bpfeb-unknown-none/release/xdp_pattern_match
+Cross compilation should work on both Intel and Apple Silicon Macs.
+
+```shell
+CC=${ARCH}-linux-musl-gcc cargo build --package kernel-regex --release \
+  --target=${ARCH}-unknown-linux-musl \
+  --config=target.${ARCH}-unknown-linux-musl.linker=\"${ARCH}-linux-musl-gcc\"
 ```
+The cross-compiled program `target/${ARCH}-unknown-linux-musl/release/kernel-regex` can be
+copied to a Linux server or VM and run there.
 
-This will:
-1. Load the eBPF program into kernel
-2. Store the pattern in the `ALGORITHM_MAP` BPF map
-3. Attach XDP program to interface
-4. Match incoming payloads against the pattern
-5. Forward matching packets, drop non-matching ones
+## License
 
-## Features
+With the exception of eBPF code, kernel-regex is distributed under the terms
+of either the [MIT license] or the [Apache License] (version 2.0), at your
+option.
 
-- **Aya Framework**: Safe Rust abstractions over eBPF
-- **XDP Hook**: Kernel-space pattern matching at network layer
-- **Dynamic Patterns**: Change patterns without recompiling XDP code
-- **BPF Maps**: Store algorithms dynamically from userspace
-- **Zero-copy**: Packets processed without context switches
-- **Async Monitoring**: Tokio-based result monitoring
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in this crate by you, as defined in the Apache-2.0 license, shall
+be dual licensed as above, without any additional terms or conditions.
 
-## Pattern Matching
+### eBPF
 
-- **Algorithm**: Substring matching (can be extended to full regex)
-- **Performance**: Kernel-space execution = minimal latency
-- **Results**: Match status stored in `RESULTS_MAP` for userspace access
+All eBPF code is distributed under either the terms of the
+[GNU General Public License, Version 2] or the [MIT license], at your
+option.
 
-## Real-world Extensions
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in this project by you, as defined in the GPL-2 license, shall be
+dual licensed as above, without any additional terms or conditions.
 
-- **regex crate in eBPF**: Use `regex_lite` or similar for kernel space
-- **Complex algorithms**: Finite automata, DFA patterns
-- **Statistics**: Count matches, track performance metrics
-- **Per-packet context**: Store detailed match information
-
-## Requirements
-
-- Linux kernel with XDP support
-- Rust toolchain with BPF target support
-- LLVM with BPF backend
-- Aya framework
+[Apache license]: LICENSE-APACHE
+[MIT license]: LICENSE-MIT
+[GNU General Public License, Version 2]: LICENSE-GPL2

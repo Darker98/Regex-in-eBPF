@@ -1,0 +1,17 @@
+[package]
+name = "kernel-regex-ebpf"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+kernel-regex-common = { path = "../kernel-regex-common" }
+
+aya-ebpf = { workspace = true }
+aya-log-ebpf = { workspace = true }
+network-types = { workspace = true }
+[build-dependencies]
+which = { workspace = true }
+
+[[bin]]
+name = "kernel-regex"
+path = "src/main.rs"
