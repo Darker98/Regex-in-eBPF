@@ -5,6 +5,8 @@ use clap::Parser;
 use log::{debug, warn};
 use tokio::signal;
 
+mod regex_to_nfa;
+
 #[derive(Debug, Parser)]
 struct Opt {
     #[clap(short, long, default_value = "lo")]

@@ -163,7 +163,7 @@ fn try_kernel_regex(ctx: XdpContext) -> Result<u32, ()> {
         }
     }
 
-    unsafe { info!(&ctx, "{}", (*payload).data) };
+    // unsafe { info!(&ctx, "{}", (*payload).data) };
 
     Ok(xdp_action::XDP_PASS)
 
