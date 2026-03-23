@@ -6,6 +6,7 @@ use log::{debug, warn};
 use tokio::signal;
 
 mod regex_to_nfa;
+mod nfa_to_dfa;
 
 #[derive(Debug, Parser)]
 struct Opt {

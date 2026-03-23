@@ -81,10 +81,10 @@ pub enum Label {
     Any,                        // . wildcard
 }
 
-struct State {
-    label: Label,
-    edge1: Option<usize>,
-    edge2: Option<usize>
+pub struct State {
+    pub label: Label,
+    pub edge1: Option<usize>,
+    pub edge2: Option<usize>
 }
 
 impl State {
@@ -193,22 +193,25 @@ pub fn compile(postfix: &[char], arena: &mut NfaArena) -> Fragment {
     stack.pop().unwrap()
 }
 
+fn postfix(re: &str) -> Vec<char> {
+    shunt(re)
+}
+
+pub fn build(re: &str) -> (NfaArena, Fragment) {
+    let mut arena = NfaArena::new();
+    let pf = postfix(re);
+    let frag = compile(&pf, &mut arena);
+    (arena, frag)
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
-    fn postfix(re: &str) -> Vec<char> {
-        shunt(re)
-    }
 
-    fn build(re: &str) -> (NfaArena, Fragment) {
-        let mut arena = NfaArena::new();
-        let pf = postfix(re);
-        let frag = compile(&pf, &mut arena);
-        (arena, frag)
-    }
 
     /// Walk the NFA and check whether `input` is accepted.
     /// This is a simple recursive epsilon-closure simulation — not efficient,
