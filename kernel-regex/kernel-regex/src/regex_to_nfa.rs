@@ -1,78 +1,6 @@
 use std::{collections::HashMap};
 
-pub fn insert_concat(infix: &str) -> String {
-    let specials = ['*', '+', '?', '|', '(', ')'];
-    let mut result = String::new();
-    let chars: Vec<char> = infix.chars().collect();
-
-    for i in 0..chars.len() {
-        let c = chars[i];
-        result.push(c);
-
-        if i + 1 < chars.len() {
-            let next = chars[i + 1];
-            // insert '.' between two atoms, or after quantifier before atom
-            let left_ok  = !matches!(c, '|' | '(');
-            let right_ok = !matches!(next, '|' | ')' | '*' | '+' | '?');
-            if left_ok && right_ok {
-                result.push('.');
-            }
-        }
-    }
-    result
-}
-
-fn shunt(infix_original: &str) -> Vec<char> {
-    let mut specials: HashMap<char, u8> = HashMap::new();
-
-    specials.insert('*', 60);
-    specials.insert('+', 55);
-    specials.insert('?', 50);
-    specials.insert('.', 40);
-    specials.insert('|', 20);
-
-    let mut infix = insert_concat(infix_original);
-
-    let mut postfix: Vec<char> = Vec::new();
-    let mut stack: Vec<char> = Vec::new();
-
-    for c in infix.chars() {
-        // Open bracket
-        if c.eq(&'(') {
-            stack.push(c);
-        }
-
-        // Closed bracket
-        else if c.eq(&')') {
-            while stack[stack.len() - 1] != '(' {
-                postfix.push(stack[stack.len() - 1]);
-                stack.pop();
-            }
-            stack.pop();
-        }
-
-        // Special character
-        else if specials.contains_key(&c) {
-            while !stack.is_empty() && (specials.get(&c).or_else(|| Some(&0)) <= specials.get(&stack[stack.len() - 1]).or_else(|| Some(&0))) {
-                postfix.push(stack[stack.len() - 1]);
-                stack.pop();
-            }
-            stack.push(c);
-        }
-
-        // Regular character
-        else {
-            postfix.push(c);
-        }
-    }
-
-    while !stack.is_empty() {
-        postfix.push(stack[stack.len() - 1]);
-        stack.pop();
-    }
-
-    postfix
-}
+use crate::regex_preprocessing::postfix;
 
 pub enum Label {
     Epsilon,
@@ -193,10 +121,6 @@ pub fn compile(postfix: &[char], arena: &mut NfaArena) -> Fragment {
     stack.pop().unwrap()
 }
 
-fn postfix(re: &str) -> Vec<char> {
-    shunt(re)
-}
-
 pub fn build(re: &str) -> (NfaArena, Fragment) {
     let mut arena = NfaArena::new();
     let pf = postfix(re);
@@ -209,59 +133,59 @@ pub fn build(re: &str) -> (NfaArena, Fragment) {
 mod tests {
     use super::*;
 
-    // ── helpers ──────────────────────────────────────────────────────────────
+    // ── helper functions ──────────────────────────────────────────────────────────────
 
 
 
-    /// Walk the NFA and check whether `input` is accepted.
-    /// This is a simple recursive epsilon-closure simulation — not efficient,
-    /// but correct enough for testing Thompson construction.
-    fn accepts(arena: &NfaArena, frag: &Fragment, input: &str) -> bool {
-        fn step(arena: &NfaArena, state: usize, chars: &[char]) -> bool {
-            if chars.is_empty() {
-                // are we at accept, or can we epsilon-reach it?
-                return state == usize::MAX || epsilon_reach(arena, state, chars);
-            }
-            let s = &arena.states[state];
-            match s.label {
-                // epsilon state — follow edges without consuming input
-                Label::Epsilon => {
-                    let e1 = s.edge1.map_or(false, |n| step(arena, n, chars));
-                    let e2 = s.edge2.map_or(false, |n| step(arena, n, chars));
-                    e1 || e2
-                }
-                // labelled state — consume one char if it matches
-                Label::Char(c) => {
-                    if c == chars[0] {
-                        s.edge1.map_or(false, |n| step(arena, n, &chars[1..]))
-                    } else {
-                        false
-                    }
-                }
-                _ => false
-            }
-        }
+    // /// Walk the NFA and check whether `input` is accepted.
+    // /// This is a simple recursive epsilon-closure simulation — not efficient,
+    // /// but correct enough for testing Thompson construction.
+    // fn accepts(arena: &NfaArena, frag: &Fragment, input: &str) -> bool {
+    //     fn step(arena: &NfaArena, state: usize, chars: &[char]) -> bool {
+    //         if chars.is_empty() {
+    //             // are we at accept, or can we epsilon-reach it?
+    //             return state == usize::MAX || epsilon_reach(arena, state, chars);
+    //         }
+    //         let s = &arena.states[state];
+    //         match s.label {
+    //             // epsilon state — follow edges without consuming input
+    //             Label::Epsilon => {
+    //                 let e1 = s.edge1.map_or(false, |n| step(arena, n, chars));
+    //                 let e2 = s.edge2.map_or(false, |n| step(arena, n, chars));
+    //                 e1 || e2
+    //             }
+    //             // labelled state — consume one char if it matches
+    //             Label::Char(c) => {
+    //                 if c == chars[0] {
+    //                     s.edge1.map_or(false, |n| step(arena, n, &chars[1..]))
+    //                 } else {
+    //                     false
+    //                 }
+    //             }
+    //             _ => false
+    //         }
+    //     }
 
-        // separate epsilon-only reach check for accept detection
-        fn epsilon_reach(arena: &NfaArena, state: usize, chars: &[char]) -> bool {
-            let s = &arena.states[state];
-            if !s.is_epsilon() {
-                return false; // labelled — can't epsilon past it
-            }
-            let e1 = s.edge1.map_or(false, |n| {
-                if n == usize::MAX { true } else { epsilon_reach(arena, n, chars) }
-            });
-            let e2 = s.edge2.map_or(false, |n| {
-                if n == usize::MAX { true } else { epsilon_reach(arena, n, chars) }
-            });
-            e1 || e2
-        }
+    //     // separate epsilon-only reach check for accept detection
+    //     fn epsilon_reach(arena: &NfaArena, state: usize, chars: &[char]) -> bool {
+    //         let s = &arena.states[state];
+    //         if !s.is_epsilon() {
+    //             return false; // labelled — can't epsilon past it
+    //         }
+    //         let e1 = s.edge1.map_or(false, |n| {
+    //             if n == usize::MAX { true } else { epsilon_reach(arena, n, chars) }
+    //         });
+    //         let e2 = s.edge2.map_or(false, |n| {
+    //             if n == usize::MAX { true } else { epsilon_reach(arena, n, chars) }
+    //         });
+    //         e1 || e2
+    //     }
 
-        let chars: Vec<char> = input.chars().collect();
-        step(arena, frag.start, &chars)
-    }
+    //     let chars: Vec<char> = input.chars().collect();
+    //     step(arena, frag.start, &chars)
+    // }
 
-    /// Simpler accept check: just simulate state sets (correct NFA simulation)
+    /// Accept check: just simulate state sets 
     fn run(arena: &NfaArena, frag: &Fragment, input: &str) -> bool {
         use std::collections::HashSet;
 
@@ -306,34 +230,7 @@ mod tests {
         current.contains(&frag.accept)
     }
 
-    // ── insert_concat ────────────────────────────────────────────────────────
-
-    #[test]
-    fn concat_inserts_dot_between_literals() {
-        assert_eq!(insert_concat("ab"), "a.b");
-    }
-
-    #[test]
-    fn concat_no_dot_after_pipe() {
-        assert_eq!(insert_concat("a|b"), "a|b");
-    }
-
-    #[test]
-    fn concat_no_dot_before_quantifier() {
-        assert_eq!(insert_concat("ab*"), "a.b*");
-    }
-
-    #[test]
-    fn concat_after_quantifier_before_literal() {
-        assert_eq!(insert_concat("a*b"), "a*.b");
-    }
-
-    #[test]
-    fn concat_group() {
-        assert_eq!(insert_concat("a(bc)"), "a.(b.c)");
-    }
-
-    // ── shunt (postfix) ──────────────────────────────────────────────────────
+    // ── postfix tests ──────────────────────────────────────────────────────
 
     #[test]
     fn postfix_simple_concat() {

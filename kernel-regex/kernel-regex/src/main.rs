@@ -1,12 +1,16 @@
 use anyhow::Context as _;
-use aya::{Ebpf, maps::Array, programs::{Xdp, XdpFlags}};
+use aya::{Ebpf, maps::{Array, HashMap}, programs::{Xdp, XdpFlags}};
 use clap::Parser;
 #[rustfmt::skip]
 use log::{debug, warn};
 use tokio::signal;
 
+use crate::{dfa_to_hashmap::{DfaMap, dfa_to_map}, nfa_to_dfa::nfa_to_dfa, regex_preprocessing::postfix, regex_to_nfa::build};
+
 mod regex_to_nfa;
 mod nfa_to_dfa;
+mod regex_preprocessing;
+mod dfa_to_hashmap;
 
 #[derive(Debug, Parser)]
 struct Opt {
@@ -14,21 +18,36 @@ struct Opt {
     iface: String,
 }
 
-// const REGEX_PATTERN: &str = r"/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/";
-const REGEX_PATTERN: &str = r"HTTP";
+const REGEX_PATTERN: &str = r"192.168.100.6";
 
-fn upload_regex_to_ebpf(ebpf: &mut Ebpf) -> Result<(), anyhow::Error> {
-    // Load algorithm map 
-    let mut algorithm_map: Array<_, [u8; 64]> = ebpf.map_mut("ALGORITHM_MAP").unwrap().try_into()?;
+pub fn upload_regex(bpf: &mut Ebpf, regex: &str) -> Result<(), anyhow::Error> {
+    let (nfa, frag) = build(regex);
+    let dfa = nfa_to_dfa(&nfa, &frag);
+    let dfa_map = dfa_to_map(&dfa);
 
-    let mut pattern_buf = [0u8; 64];
-    let bytes = REGEX_PATTERN.as_bytes();
-    let copy_len = bytes.len().min(63);
-    pattern_buf[..copy_len].copy_from_slice(&bytes[..copy_len]);
+    load_dfa_into_maps(bpf, &dfa_map)?;
 
-    algorithm_map
-        .set(0, pattern_buf, 0)
-        .map_err(|e| anyhow::anyhow!("failed to set pattern: {}", e))?;
+    Ok(())
+}
+
+pub fn load_dfa_into_maps(bpf: &mut Ebpf, dfa_map: &DfaMap) -> Result<(), anyhow::Error> {
+    // load transition table
+    let mut transitions: HashMap<_, u32, u32> = HashMap::try_from(
+        bpf.map_mut("TRANSITIONS").unwrap()
+    )?;
+
+    for (&key, &next_state) in &dfa_map.transitions {
+        transitions.insert(key, next_state, 0)?;
+    }
+
+    // load accept states
+    let mut accept_states: HashMap<_, u32, u8> = HashMap::try_from(
+        bpf.map_mut("ACCEPT_STATES").unwrap()
+    )?;
+
+    for &state in &dfa_map.accept_states {
+        accept_states.insert(state, 1u8, 0)?;
+    }
 
     Ok(())
 }
@@ -81,11 +100,7 @@ async fn main() -> anyhow::Result<()> {
     program.attach(&iface, XdpFlags::default())
         .context("failed to attach the XDP program with default flags - try changing XdpFlags::default() to XdpFlags::SKB_MODE")?;
 
-    // Attempt to upload regex pattern to eBPF map at startup
-    match upload_regex_to_ebpf(&mut ebpf) {
-        Ok(_) => println!("Uploaded regex pattern to eBPF map successfully"),
-        Err(e) => eprintln!("Error uploading regex to eBPF: {}", e),
-    }
+    upload_regex(&mut ebpf, REGEX_PATTERN)?;
     
     let ctrl_c = signal::ctrl_c();
     println!("Waiting for Ctrl-C...");

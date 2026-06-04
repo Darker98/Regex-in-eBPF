@@ -12,7 +12,6 @@ pub struct Dfa {
 }
 
 pub fn nfa_to_dfa(arena: &NfaArena, frag: &Fragment) -> Dfa {
-    // ── epsilon closure (reused from your run() logic) ───────────────────
     fn epsilon_closure(arena: &NfaArena, states: &BTreeSet<usize>) -> BTreeSet<usize> {
         let mut closure = states.clone();
         let mut stack: Vec<usize> = states.iter().copied().collect();
@@ -29,7 +28,7 @@ pub fn nfa_to_dfa(arena: &NfaArena, frag: &Fragment) -> Dfa {
         closure
     }
 
-    // ── collect every character label in the NFA ─────────────────────────
+    // collect every character label in the NFA
     // these are the only characters we need to compute transitions for
     fn alphabet(arena: &NfaArena) -> HashSet<char> {
         let mut chars = HashSet::new();
@@ -57,7 +56,7 @@ pub fn nfa_to_dfa(arena: &NfaArena, frag: &Fragment) -> Dfa {
         chars
     }
 
-    // ── step: from a set of NFA states, consume char c ──────────────────
+    // from a set of NFA states, consume char c
     fn step(arena: &NfaArena, states: &BTreeSet<usize>, c: char) -> BTreeSet<usize> {
         let mut next = BTreeSet::new();
         for &s in states {
@@ -77,7 +76,7 @@ pub fn nfa_to_dfa(arena: &NfaArena, frag: &Fragment) -> Dfa {
         next
     }
 
-    // ── powerset construction ────────────────────────────────────────────
+    // powerset construction
     // Each DFA state is a BTreeSet of NFA states (BTreeSet so it's hashable
     // and deterministic — HashMap key needs Eq+Hash, BTreeSet gives us that)
 
